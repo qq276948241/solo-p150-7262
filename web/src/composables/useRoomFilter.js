@@ -13,14 +13,26 @@ export function useRoomFilter({ debounceDelay = 300 } = {}) {
   let keywordTimer = null
 
   watch(searchKeyword, (val) => {
+    const safeVal = String(val || '')
+    if (safeVal.length > 50) {
+      searchKeyword.value = safeVal.slice(0, 50)
+      return
+    }
     if (keywordTimer) clearTimeout(keywordTimer)
     keywordTimer = setTimeout(() => {
-      debouncedKeyword.value = val
+      debouncedKeyword.value = safeVal
     }, debounceDelay)
   }, { immediate: true })
 
   onUnmounted(() => {
     if (keywordTimer) clearTimeout(keywordTimer)
+  })
+
+  const normalizedKeyword = computed(() => {
+    const raw = String(debouncedKeyword.value || '')
+    const trimmed = raw.trim()
+    if (!trimmed || trimmed.length > 50) return ''
+    return trimmed.toLowerCase()
   })
 
   const filteredRooms = computed(() => {
@@ -31,13 +43,14 @@ export function useRoomFilter({ debounceDelay = 300 } = {}) {
       list = list.filter(r => Number(r.building_id) === bid)
     }
 
-    const kw = String(debouncedKeyword.value || '').trim().toLowerCase()
+    const kw = normalizedKeyword.value
     if (kw) {
-      list = list.filter(r =>
-        String(r.room_no || '').toLowerCase().includes(kw) ||
-        String(r.name || '').toLowerCase().includes(kw) ||
-        String(r.building_name || '').toLowerCase().includes(kw)
-      )
+      list = list.filter(r => {
+        const roomNo = String(r.room_no || '').toLowerCase()
+        const name = String(r.name || '').toLowerCase()
+        const buildingName = String(r.building_name || '').toLowerCase()
+        return roomNo.startsWith(kw) || name.includes(kw) || buildingName.includes(kw)
+      })
     }
 
     return list

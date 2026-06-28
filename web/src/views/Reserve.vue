@@ -33,7 +33,9 @@
           v-model="searchKeyword"
           placeholder="搜索教室编号或名称，如 A101、第一教学楼"
           clearable
-          style="width: 320px"
+          maxlength="50"
+          show-word-limit
+          style="width: 360px"
           :prefix-icon="Search"
         />
         <span class="filter-count">
