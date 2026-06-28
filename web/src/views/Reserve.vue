@@ -17,11 +17,10 @@
     <el-card class="filter-card" shadow="never">
       <div class="quick-filter-bar">
         <el-select
-          v-model="filterForm.building_id"
+          v-model="selectedBuildingId"
           placeholder="全部楼栋"
           clearable
           style="width: 180px"
-          @change="handleBuildingFilterChange"
         >
           <el-option
             v-for="b in buildings"
@@ -38,7 +37,7 @@
           :prefix-icon="Search"
         />
         <span class="filter-count">
-          共 <el-tag type="primary" effect="plain" size="small">{{ filteredRooms.length }}</el-tag> 间自习室
+          共 <el-tag type="primary" effect="plain" size="small">{{ filteredCount }}</el-tag> / {{ totalCount }} 间自习室
         </span>
       </div>
 
@@ -189,12 +188,21 @@ import {
   Calendar, Loading, Chair, Lock, CircleCheckFilled, Close, Search
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { getBuildings, getRooms, getRoomDetail, getSeats } from '@/api/room'
+import { getRoomDetail, getSeats } from '@/api/room'
 import { getViolationStatus, createReservation } from '@/api/reservation'
+import { useRoomFilter } from '@/composables/useRoomFilter'
 
-const buildings = ref([])
-const allRooms = ref([])
-const searchKeyword = ref('')
+const {
+  buildings,
+  selectedBuildingId,
+  searchKeyword,
+  filteredRooms,
+  totalCount,
+  filteredCount,
+  loadAll: loadRoomFilterData,
+  isRoomInFiltered
+} = useRoomFilter({ debounceDelay: 300 })
+
 const seats = ref([])
 const seatsLoading = ref(false)
 const submitting = ref(false)
@@ -204,7 +212,6 @@ const violationStatus = ref({ count: 0, isBanned: false, month: '' })
 
 const today = dayjs().format('YYYY-MM-DD')
 const filterForm = reactive({
-  building_id: '',
   room_id: '',
   date: today,
   start_time: '',
@@ -217,22 +224,6 @@ const durationMinutes = computed(() => {
   const end = dayjs(`2024-01-01 ${filterForm.end_time}`)
   const diff = end.diff(start, 'minute')
   return diff > 0 ? diff : 0
-})
-
-const filteredRooms = computed(() => {
-  let list = allRooms.value
-  if (filterForm.building_id) {
-    list = list.filter(r => r.building_id === filterForm.building_id)
-  }
-  const kw = searchKeyword.value.trim().toLowerCase()
-  if (kw) {
-    list = list.filter(r =>
-      String(r.room_no || '').toLowerCase().includes(kw) ||
-      String(r.name || '').toLowerCase().includes(kw) ||
-      String(r.building_name || '').toLowerCase().includes(kw)
-    )
-  }
-  return list
 })
 
 const canLoadSeats = computed(() => {
@@ -336,30 +327,18 @@ function handleSeatClick(seat) {
   selectedSeat.value = seat
 }
 
-async function loadBuildings() {
-  try {
-    const [buildingList, roomList] = await Promise.all([
-      getBuildings(),
-      getRooms()
-    ])
-    buildings.value = buildingList
-    allRooms.value = roomList
-  } catch (e) {
-    console.error(e)
-  }
+function clearRoomSelection() {
+  filterForm.room_id = ''
+  selectedSeat.value = null
+  seats.value = []
+  currentRoom.value = null
 }
 
-function handleBuildingFilterChange() {
-  if (filterForm.room_id) {
-    const stillExists = filteredRooms.value.some(r => r.id === filterForm.room_id)
-    if (!stillExists) {
-      filterForm.room_id = ''
-      selectedSeat.value = null
-      seats.value = []
-      currentRoom.value = null
-    }
+watch([selectedBuildingId, searchKeyword], () => {
+  if (filterForm.room_id && !isRoomInFiltered(filterForm.room_id)) {
+    clearRoomSelection()
   }
-}
+})
 
 async function handleRoomChange() {
   selectedSeat.value = null
@@ -447,11 +426,12 @@ async function handleSubmit() {
         type: 'info'
       }
     )
+    const finalBuildingId = selectedBuildingId.value ?? selectedSeat.value.building_id
     submitting.value = true
     await createReservation({
       seat_id: selectedSeat.value.id,
-      room_id: filterForm.room_id,
-      building_id: filterForm.building_id,
+      room_id: Number(filterForm.room_id),
+      building_id: Number(finalBuildingId),
       reserve_date: filterForm.date,
       start_time: filterForm.start_time,
       end_time: filterForm.end_time
@@ -468,18 +448,6 @@ async function handleSubmit() {
   }
 }
 
-watch(searchKeyword, () => {
-  if (filterForm.room_id) {
-    const stillExists = filteredRooms.value.some(r => r.id === filterForm.room_id)
-    if (!stillExists) {
-      filterForm.room_id = ''
-      selectedSeat.value = null
-      seats.value = []
-      currentRoom.value = null
-    }
-  }
-})
-
 watch(canLoadSeats, (val) => {
   if (val && filterForm.room_id) {
     loadSeats()
@@ -488,7 +456,7 @@ watch(canLoadSeats, (val) => {
 
 onMounted(async () => {
   await loadViolationStatus()
-  await loadBuildings()
+  await loadRoomFilterData()
 })
 </script>
 
