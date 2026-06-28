@@ -15,35 +15,46 @@
     </div>
 
     <el-card class="filter-card" shadow="never">
-      <el-form :inline="true" :model="filterForm" class="filter-form">
-        <el-form-item label="楼栋">
-          <el-select
-            v-model="filterForm.building_id"
-            placeholder="请选择楼栋"
-            style="width: 180px"
-            @change="handleBuildingChange"
-          >
-            <el-option
-              v-for="b in buildings"
-              :key="b.id"
-              :label="b.name"
-              :value="b.id"
-            />
-          </el-select>
-        </el-form-item>
+      <div class="quick-filter-bar">
+        <el-select
+          v-model="filterForm.building_id"
+          placeholder="全部楼栋"
+          clearable
+          style="width: 180px"
+          @change="handleBuildingFilterChange"
+        >
+          <el-option
+            v-for="b in buildings"
+            :key="b.id"
+            :label="b.name"
+            :value="b.id"
+          />
+        </el-select>
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索教室编号或名称，如 A101、第一教学楼"
+          clearable
+          style="width: 320px"
+          :prefix-icon="Search"
+        />
+        <span class="filter-count">
+          共 <el-tag type="primary" effect="plain" size="small">{{ filteredRooms.length }}</el-tag> 间自习室
+        </span>
+      </div>
 
+      <el-form :inline="true" :model="filterForm" class="filter-form" style="margin-top: 16px">
         <el-form-item label="自习室">
           <el-select
             v-model="filterForm.room_id"
             placeholder="请选择自习室"
-            style="width: 220px"
-            :disabled="!filterForm.building_id"
+            style="width: 280px"
+            :disabled="filteredRooms.length === 0"
             @change="handleRoomChange"
           >
             <el-option
-              v-for="r in rooms"
+              v-for="r in filteredRooms"
               :key="r.id"
-              :label="`${r.room_no} - ${r.name}`"
+              :label="`${r.room_no} - ${r.name}（${r.building_name}）`"
               :value="r.id"
             />
           </el-select>
@@ -175,14 +186,15 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Calendar, Loading, Chair, Lock, CircleCheckFilled, Close
+  Calendar, Loading, Chair, Lock, CircleCheckFilled, Close, Search
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { getBuildings, getRooms, getRoomDetail, getSeats } from '@/api/room'
 import { getViolationStatus, createReservation } from '@/api/reservation'
 
 const buildings = ref([])
-const rooms = ref([])
+const allRooms = ref([])
+const searchKeyword = ref('')
 const seats = ref([])
 const seatsLoading = ref(false)
 const submitting = ref(false)
@@ -205,6 +217,22 @@ const durationMinutes = computed(() => {
   const end = dayjs(`2024-01-01 ${filterForm.end_time}`)
   const diff = end.diff(start, 'minute')
   return diff > 0 ? diff : 0
+})
+
+const filteredRooms = computed(() => {
+  let list = allRooms.value
+  if (filterForm.building_id) {
+    list = list.filter(r => r.building_id === filterForm.building_id)
+  }
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (kw) {
+    list = list.filter(r =>
+      String(r.room_no || '').toLowerCase().includes(kw) ||
+      String(r.name || '').toLowerCase().includes(kw) ||
+      String(r.building_name || '').toLowerCase().includes(kw)
+    )
+  }
+  return list
 })
 
 const canLoadSeats = computed(() => {
@@ -310,28 +338,26 @@ function handleSeatClick(seat) {
 
 async function loadBuildings() {
   try {
-    buildings.value = await getBuildings()
-    if (buildings.value.length > 0) {
-      filterForm.building_id = buildings.value[0].id
-      await handleBuildingChange()
-    }
+    const [buildingList, roomList] = await Promise.all([
+      getBuildings(),
+      getRooms()
+    ])
+    buildings.value = buildingList
+    allRooms.value = roomList
   } catch (e) {
     console.error(e)
   }
 }
 
-async function handleBuildingChange() {
-  filterForm.room_id = ''
-  selectedSeat.value = null
-  seats.value = []
-  try {
-    rooms.value = await getRooms({ building_id: filterForm.building_id })
-    if (rooms.value.length > 0) {
-      filterForm.room_id = rooms.value[0].id
-      await handleRoomChange()
+function handleBuildingFilterChange() {
+  if (filterForm.room_id) {
+    const stillExists = filteredRooms.value.some(r => r.id === filterForm.room_id)
+    if (!stillExists) {
+      filterForm.room_id = ''
+      selectedSeat.value = null
+      seats.value = []
+      currentRoom.value = null
     }
-  } catch (e) {
-    console.error(e)
   }
 }
 
@@ -442,6 +468,18 @@ async function handleSubmit() {
   }
 }
 
+watch(searchKeyword, () => {
+  if (filterForm.room_id) {
+    const stillExists = filteredRooms.value.some(r => r.id === filterForm.room_id)
+    if (!stillExists) {
+      filterForm.room_id = ''
+      selectedSeat.value = null
+      seats.value = []
+      currentRoom.value = null
+    }
+  }
+})
+
 watch(canLoadSeats, (val) => {
   if (val && filterForm.room_id) {
     loadSeats()
@@ -455,6 +493,20 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.quick-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 4px 0 12px 0;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.filter-count {
+  font-size: 13px;
+  color: #606266;
+}
+
 .filter-card :deep(.el-form-item) {
   margin-bottom: 0;
 }
